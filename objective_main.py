@@ -112,6 +112,40 @@ class HimawariProcessor:
             except ValueError:
                 print("输入无效。请输入逗号分隔的数字 (例如: 1, 3, 5) 或 'all'。")
 
+    def prompt_user_area_choosen(self) -> str:
+        """
+        提示用户选择处理的区域。
+        """
+        print("\n请选择处理的区域(默认为 finest_area ):")
+        print("  1: finest_area")
+        print("  2: coarsest_area")
+        print("  3: 自定义区域 (输入坐标范围)暂不支持自定义区域选择。")
+
+        while True:
+            user_input = input("> ").strip()
+            # if user_input == "1":
+            #     return "finest_area"
+            # elif user_input == "2":
+            #     return "coarsest_area"
+            # elif user_input == "3":
+            #     coords = input("请输入坐标范围 (例如: lon_min, lon_max, lat_min, lat_max): ")
+            #     return coords
+            # else:
+            #     print("输入无效。请输入 1, 2 或 3。")
+            match user_input:
+                case "1":
+                    return "finest_area"
+                case "2":
+                    return "coarsest_area"
+                case "3":
+                    print("暂不支持自定义区域选择。")
+                    continue
+                    # coords = input("请输入坐标范围 (例如: lon_min, lon_max, lat_min, lat_max): ")
+                    # return coords
+                case _:
+                    logging.info("用户无输入，选择默认区域: finest_area")
+                    return "finest_area"
+
     def decompress_bz2(self, bz2_file_path: Path, output_dir: Path) -> Path | None:
         """
         解压 .bz2 文件，检查重复和零大小。
@@ -141,7 +175,11 @@ class HimawariProcessor:
                 output_path.unlink()
             return None
 
-    def decompress_files_multithreaded(self, bz2_files: list[Path], output_dir: Path, max_workers: int) -> dict[Path, Path | None]:
+    def decompress_files_multithreaded(self,
+                                       bz2_files: list[Path],
+                                       output_dir: Path,
+                                       max_workers: int
+                                       ) -> dict[Path, Path | None]:
         """
         多线程解压缩 .bz2 文件列表。
         """
@@ -192,7 +230,11 @@ class HimawariProcessor:
         max_val = np.nanmax(np_array)
         return max_val - (np_array - min_val)
 
-    def process_true_data(self, decompressed_files: list[Path], output_dir: Path):
+    def process_true_data(self,
+                          decompressed_files: list[Path],
+                          output_dir: Path,
+                          resample_area: str = "finest_area"
+                          ):
         """
         使用 Satpy 处理解压缩后的数据文件，生成合成图像。
         """
@@ -233,12 +275,18 @@ class HimawariProcessor:
             resampled_scn = None
             if true_color_base_bands.issubset(available_datasets):
                 scn.load(['true_color', 'B13'])
-                resample_cache = Path("./resample_cache")
-                resample_cache.mkdir(exist_ok=True)
-                resampled_scn = scn.resample(scn.finest_area(),
-                                             resampler="native",
-                                             cache_dir=str(resample_cache)
-                                             )
+                area = None
+                match resample_area:
+                    case "finest_area":
+                        area = scn.finest_area()
+                    case "coarsest_area":
+                        area = scn.coarsest_area()
+                    case _:
+                        print("暂不支持")
+                        logging.warning("未知的重采样区域: %s", resample_area)
+                        return
+
+                resampled_scn = scn.resample(area, resampler="native")
                 del scn
             else:
                 logging.warning("缺少必要的波段，无法生成真彩色图像。")
@@ -272,6 +320,8 @@ class HimawariProcessor:
             logging.info("用户未选择任何时间点，退出。")
             return
 
+        area = self.prompt_user_area_choosen()
+
         for slot_key in selected_slots:
             bz2_files = available_slots[slot_key]
             logging.info("处理时间点: %s", slot_key)
@@ -282,7 +332,10 @@ class HimawariProcessor:
 
             successful_files = [f for f in decompressed_files.values() if f]
 
-            self.process_true_data(successful_files, OUTPUT_DIR)
+            self.process_true_data(decompressed_files=successful_files,
+                                   output_dir=OUTPUT_DIR,
+                                   resample_area=area
+                                   )
 
 if __name__ == "__main__":
     try:
